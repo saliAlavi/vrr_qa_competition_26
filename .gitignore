@@ -1,0 +1,51 @@
+# --- Claude Code local instructions (project-local, not for the repo) ---
+CLAUDE.md
+.claude/
+
+# --- Secrets / credentials ---
+.env
+*.key
+*_key*
+**/uploads.json        # Gemini File-API upload cache (contains file handles)
+token.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+
+# --- LaTeX build artifacts (keep .tex/.pdf/.sty/.bib) ---
+*.aux
+*.log
+*.out
+*.toc
+*.brf
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# --- Experiment outputs / caches / large media (regenerable; live on scratch) ---
+wandb/
+logs/
+*.log
+runs/
+cache/
+*.zip                  # built submission archives (regenerable)
+*.mp4
+*.mkv
+*.webm
+*.tar
+*.tar.gz
+*.npy
+*.npz
+*.png                  # rendered figure previews (keep fig_results.pdf)
+
+# --- OS ---
+.DS_Store
+Thumbs.db

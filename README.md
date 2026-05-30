@@ -6,6 +6,14 @@ Training-free system for implicit video question answering. Best result on the h
 **AvgAcc 81.18 / MacroAvgAcc 78.85** (Gemini 3.1 Pro, native video, self-consistency k=5),
 surpassing the prior leaderboard best (80.85). See `docs/technical_report/report.pdf`.
 
+## Results (test split, n=172)
+| System | AvgAcc | MacroAcc |
+|---|---|---|
+| Qwen2.5-VL-7B (CoT) | 50.2 | 47.3 |
+| Qwen3-VL-32B-AWQ + self-consistency (open-source ceiling) | 58.5 | 56.2 |
+| **Gemini 3.1 Pro + self-consistency k=5** | **81.18** | **78.85** |
+| *prior leaderboard best* | *80.85* | — |
+
 ## Approach (one paragraph)
 The benchmark is *perception-bound*, not reasoning-bound. We feed each pre-trimmed clip as **native
 video** to a frontier model (Gemini 3.1 Pro), sample **k=5 chain-of-thought answers** at temperature
@@ -58,3 +66,22 @@ sbatch --gpus-per-node=2 scripts/run_dp.sbatch val q3vl32_sc5 \
 ## Notes
 - No training is performed; the system is inference + test-time compute only.
 - The Gemini API key is read from `$GEMINI_API_KEY` and is **not** stored in any file.
+- The ImplicitQA/VRR-QA annotations and clips belong to their original authors; this repo only
+  ships code (and the public validation annotation file for convenience).
+
+## License
+Code is released under the **MIT License** (see `LICENSE`). Benchmark data/clips retain their
+original licenses.
+
+## Citation
+If you use this code, please cite the ImplicitQA/VRR-QA benchmark (arXiv:2506.21742) and this report:
+```
+@techreport{alavi2026perceptionfirst,
+  title  = {Perception First: A Frontier Native-Video Model with Self-Consistency
+            for Implicit Video Question Answering},
+  author = {Ali Alavi},
+  year   = {2026},
+  institution = {The Ohio State University},
+  note   = {VRR Challenge @ CVPR 2026 technical report}
+}
+```
