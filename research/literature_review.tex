@@ -1,0 +1,454 @@
+\documentclass[11pt]{article}
+
+% ---------------------------------------------------------------------------
+% Literature review: Implicit Video Reasoning QA (ImplicitQA / VRR-QA challenge)
+% Model + strategy candidate selection for the vrr_qa_competition_26 project.
+% Compile: pdflatex literature_review.tex  (run twice for references/TOC)
+%
+% Grounded in: (a) the local ImplicitQAv0.1.2.jsonl release statistics, and
+% (b) a deep, adversarially-verified multi-source web survey (24/25 claims
+% confirmed by 3-vote verification; see Sec. 6 caveats).
+% ---------------------------------------------------------------------------
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+\usepackage{titlesec}
+
+\newcommand{\best}[1]{\textbf{#1}}
+\titleformat{\section}{\large\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.6em}{}
+
+\title{\textbf{Implicit Video Reasoning for Multiple-Choice Video QA}\\[2pt]
+\large A Literature Review and Candidate Selection for the
+ImplicitQA / VRR-QA Challenge}
+\author{vrr\_qa\_competition\_26 --- research notes}
+\date{May 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent This review surveys the problem, the benchmark, and the modeling
+landscape for the \emph{ImplicitQA} video question-answering challenge
+(arXiv:2506.21742, retitled \emph{VRR-QA} in its v3 revision --- the namesake of
+this project). The task requires answering multiple-choice questions whose
+answers are \emph{not} directly observable in any single frame but must be
+\emph{inferred} from spatial layout, motion, depth, viewpoint, causality, and
+social context across discontinuous frames of creative video. We characterise
+what makes the dataset distinctive --- a small, expert-curated, reasoning-first
+benchmark with an enormous human--machine gap --- grounding the analysis in the
+exact statistics of the local release (\texttt{ImplicitQAv0.1.2}). We then go
+beyond the original baselines to survey the \emph{latest} (2025--2026) methods:
+reinforcement-learning / GRPO video reasoners (Video-R1, VideoChat-R1/R1.5,
+DeepVideo-R1), R1-Zero-style visual-spatial RL (vsGRPO), iterative-perception
+test-time scaling, and analog reasoning benchmarks (Video-Holmes). Every
+quantitative claim in Sections~3--6 was checked by a 3-vote adversarial
+verification pass; surviving caveats are reported explicitly. We close with a
+ranked, vLLM-feasible set of candidate models and inference strategies.
+\end{abstract}
+
+\tableofcontents
+\vspace{1em}
+
+% ===========================================================================
+\section{The task and the competition}
+% ===========================================================================
+The challenge targets \textbf{implicit video reasoning}: answering questions
+that ``cannot be answered through direct observation of frames alone'' and that
+demand ``reasoning about off-screen events, unstated motives, or causal chains
+spanning multiple clips''~\cite{implicitqa}. This is a deliberate departure from
+mainstream VideoQA benchmarks (Video-MME, MVBench, MLVU), which are dominated by
+\emph{explicit}, perception-style questions answerable from a single salient
+frame. The task is \textbf{multiple choice} (typically 4 options, 2--7 in
+practice), scored by accuracy and macro-averaged accuracy across reasoning
+categories. The project pipeline mirrors this: it serves a vision--language
+model (VLM) through vLLM, samples frames per clip, prompts for chain-of-thought
+(CoT) followed by an \texttt{Answer: <letter>} line, parses the letter robustly,
+and optionally aggregates several sampled reasoning paths by majority vote
+(self-consistency).
+
+% ===========================================================================
+\section{What is special about the dataset}
+% ===========================================================================
+\subsection{Headline properties}
+ImplicitQA/VRR-QA~\cite{implicitqa} contributes $\approx$1{,}000 expert-annotated
+QA pairs over $\approx$1{,}000 high-quality creative video clips spanning 15
+genres across 7 decades (mixed animated and live-action). Four properties make it
+unusual and should drive every modeling decision:
+
+\begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
+  \item \textbf{Reasoning-first, not perception-first.} Every question is
+  constructed so the answer is \emph{not} literally on screen. Frame captioning,
+  OCR, or single-frame grounding --- the workhorses of most VideoQA systems ---
+  are largely insufficient.
+  \item \textbf{Small and clean.} At $\sim$1k items it is an \emph{evaluation}
+  benchmark, not a training set. There is no in-distribution data to fine-tune on;
+  gains must come from better base models, prompting, and test-time compute.
+  \item \textbf{Large human--machine gap.} Non-expert humans reach \best{83.0\%}
+  overall / 85.6\% macro, while the best proprietary \emph{reasoning} model
+  (GPT-o3) reaches only $\approx$64.1\% / 68.6\%, GPT-4.1 only 54.3\%, and
+  \emph{no open-source model crosses 50\% overall} (InternVL3 reaches 50.2\% only
+  on the category-balanced \emph{macro} metric)~\cite{implicitqa}. The headroom is
+  enormous.
+  \item \textbf{Spatial reasoning dominates.} Four of the nine categories
+  (Lateral, Vertical, Relative Depth/Proximity, Viewpoint/Visibility) are spatial,
+  and in the local release they account for $\approx$69\% of all questions --- a
+  known weakness of current VLMs and the single most leverageable axis.
+\end{enumerate}
+
+\subsection{Category taxonomy and local distribution}
+Table~\ref{tab:cats} reports the exact counts in the local
+\texttt{ImplicitQAv0.1.2.jsonl} release (1{,}001 QA pairs over 327 unique videos).
+\emph{The spatial categories alone are the majority of the benchmark.}
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{l r r l}
+\toprule
+\textbf{Category} & \textbf{\# QA} & \textbf{Share} & \textbf{Type} \\
+\midrule
+Relative Depth and Proximity         & 266 & 26.6\% & spatial \\
+Vertical Spatial Reasoning           & 220 & 22.0\% & spatial \\
+Lateral Spatial Reasoning            & 161 & 16.1\% & spatial \\
+Motion and Trajectory Dynamics       &  91 &  9.1\% & temporal \\
+Causal and Motivational Reasoning    &  82 &  8.2\% & causal \\
+Inferred Counting                    &  58 &  5.8\% & aggregative \\
+Physical and Environmental Context   &  53 &  5.3\% & context \\
+Viewpoint and Visibility             &  41 &  4.1\% & spatial \\
+Social Interaction and Relationships &  29 &  2.9\% & social \\
+\midrule
+\textbf{Total}                       & \textbf{1001} & 100\% & \\
+\bottomrule
+\end{tabular}
+\caption{Category distribution in the local release. The four spatial categories
+(depth + vertical + lateral + viewpoint) sum to $\approx$68.8\% of the benchmark.}
+\label{tab:cats}
+\end{table}
+
+\subsection{Structural quirks that affect scoring and prompting}
+Direct inspection of the local file surfaces several practically important facts:
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+  \item \textbf{Variable option counts.} Not all questions are 4-way: 4 options
+  ($n{=}613$), 3 ($252$), 2 ($102$), 5 ($27$), 6 ($5$), 7 ($2$). A fixed
+  ``A--D'' assumption is wrong; the parser and the random baseline must be
+  option-count aware. Average chance is therefore \emph{above} 25\% (closer to
+  $\sim$30\%), so a model must clear that bar to add value.
+  \item \textbf{Answer-key prior.} Gold letters are imbalanced:
+  B ($302$) $>$ A ($296$) $>$ C ($238$) $>$ D ($159$), with E ($5$) and G ($1$)
+  rare. \textbf{B is the majority class}, which is exactly why the pipeline uses
+  \texttt{B} as the fallback choice --- a data-driven default for un-parseable
+  outputs or load failures.
+  \item \textbf{Short clips, broad range.} Question windows are short on average
+  (mean $20.2$\,s, median $12.6$\,s) but range $1.1$--$162$\,s. Short median
+  duration means \emph{dense} sampling within a short window is feasible and
+  preferable to sparse long-video sampling; a few long clips justify a modest
+  upper frame budget rather than a uniform low one.
+\end{itemize}
+
+% ===========================================================================
+\section{Benchmark evidence: what the numbers say}
+% ===========================================================================
+The original benchmarking~\cite{implicitqa} provides the clearest prior for
+candidate selection (Table~\ref{tab:baselines}, 16 uniformly sampled frames).
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{l c c}
+\toprule
+\textbf{System} & \textbf{Overall} & \textbf{Macro} \\
+\midrule
+Human (non-expert)            & \best{83.0} & \best{85.6} \\
+\midrule
+GPT-o3 (reasoning)            & 64.1 & 68.6 \\
+GPT-4.1 (full)               & 54.3 & 58.6 \\
+\midrule
+Qwen2-VL-7B                  & 44.9 & 46.0 \\
+LLaVA-OneVision-7B           & 43.4 & 46.4 \\
+InternVL3                    & 43.3 & 50.2 \\
+Qwen2.5-VL                   & 42.8 & --   \\
+LLaVA-Video-7B               & 42.1 & 46.3 \\
+Gemma-3                      & 42.1 & --   \\
+\bottomrule
+\end{tabular}
+\caption{Reported ImplicitQA accuracy (\%). No open model crosses 50\% overall;
+the reasoning-oriented GPT-o3 leads by a wide margin~\cite{implicitqa}.}
+\label{tab:baselines}
+\end{table}
+
+\noindent\textbf{Findings that carry directly into our design:}
+\begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
+  \item \textbf{Reasoning $>$ scale.} GPT-o3 beats GPT-4.1 by $\approx$9.8 points
+  purely from reasoning-style inference --- a larger jump than any model-size step
+  among non-reasoning models. \emph{Explicit step-by-step reasoning is the
+  highest-yield lever}, which is precisely what the RL methods in Section~5 try to
+  instil into small open models.
+  \item \textbf{Structured prompts help measurably.} Structured reasoning prompts
+  lifted GPT-4.1 mini, with vertical spatial reasoning improving notably. This
+  validates the project's CoT prompt and motivates \emph{category-aware} variants.
+  \item \textbf{Frames saturate early.} 8$\to$16 frames helps modestly; beyond 16,
+  accuracy saturates (Qwen2.5-VL gained $\sim$2\% from 16$\to$32). Given short
+  median clips, \best{16--32 frames} is the sweet spot; spend compute on reasoning.
+  \item \textbf{Counting and depth are hardest} for every model --- the categories
+  where targeted prompting / aggregation can most differentiate.
+\end{enumerate}
+
+% ===========================================================================
+\section{Latest methods (2025--2026)}
+% ===========================================================================
+The most important development since the original paper is the arrival of
+\textbf{reinforcement-learning (RL) post-training for video reasoning} --- the
+open-source analog of the ``reasoning $>$ scale'' effect that lets GPT-o3 lead the
+benchmark. All methods below are built on the Qwen-VL family and are therefore
+\textbf{drop-in compatible with the project's vLLM pipeline}.
+
+\subsection{RL / GRPO video reasoners}
+\paragraph{Video-R1~\cite{videor1} (NeurIPS 2025).} The first systematic R1
+paradigm for video reasoning. It introduces \textbf{T-GRPO} (temporal GRPO), whose
+contrastive ordered-vs-shuffled-frame reward explicitly forces the model to use
+temporal information rather than reason from a single frame --- directly relevant
+to ImplicitQA's cross-frame questions. Built on \textbf{Qwen2.5-VL-7B}. Reported:
+\best{35.8--37.1\%} on VSI-Bench (frame-count dependent), \emph{surpassing GPT-4o}
+(34.0\%), and \best{36.5\%} on Video-Holmes, beating o4-mini (29.9\%) and
+Gemini-2.0-Flash (30.6\%). \best{Fully open} (MIT): paper, code, 7B weights, and
+two datasets (\texttt{Video-R1-CoT-165k} for SFT cold-start,
+\texttt{Video-R1-260k} for RL); an intermediate SFT checkpoint lets you skip SFT.
+As a Qwen2.5-VL-7B derivative it runs unchanged in vLLM. \emph{This is the single
+best-evidenced open candidate.}
+
+\paragraph{VideoChat-R1~\cite{videochatr1} (NeurIPS 2025).} Rule-based
+\textbf{spatio-temporal Reinforcement Fine-Tuning (RFT)} as a data-efficient
+post-training method, with large task-specific gains (e.g.\ +31.8 temporal
+grounding, +31.2 object tracking) without sacrificing base capability. Open code
+and multiple HF checkpoints (\texttt{VideoChat-R1\_7B}, \texttt{-thinking},
+\texttt{-caption}) from OpenGVLab; Qwen2.5-VL-based, vLLM-feasible.
+
+\paragraph{VideoChat-R1.5~\cite{videochatr15} (NeurIPS 2025).} Adds \textbf{Visual
+Test-Time Scaling (VTTS)} via an \textbf{Iterative Perception (ITP)} loop:
+RL-trained spatio-temporal supervision progressively refines focus on
+high-confidence regions guided by updated text predictions --- a ``think-then-look''
+agentic loop well-suited to off-screen/implicit reasoning. Built on Qwen2.5-VL
+3B/7B, open-source. Gains are real but modest (see~\S5.3).
+
+\paragraph{DeepVideo-R1~\cite{deepvideor1} (NeurIPS 2025).} Trains with
+\textbf{Reg-GRPO} (regressive GRPO, reformulating the GRPO loss as direct
+advantage regression and removing clipping/min safeguards) plus difficulty-aware
+data augmentation, fixing two GRPO failure modes specific to video LLMs
+(safeguard reliance, vanishing advantage). Open code; reports gains across
+SEED-Bench-R1, LongVideoBench, NExT-GQA.
+
+\subsection{Visual-spatial RL (the highest-relevance axis)}
+Since $\approx$69\% of the local benchmark is spatial, methods that specifically
+boost visual-spatial reasoning are unusually relevant. \textbf{vsGRPO}
+(``Improved Visual-Spatial Reasoning via R1-Zero-Like Training'')~\cite{vsgrpo}
+applies GRPO-based, R1-Zero-style RL on a curated \texttt{VSI-100k} dataset.
+Reported: \textbf{vsGRPO-2B} (from Qwen2-VL-2B) beats its base by 12.1\% and
+\emph{surpasses GPT-4o} on VSI-Bench; \textbf{vsGRPO-7B} matches the best open
+model LLaVA-NeXT-Video-72B ($\approx$40.9). Caveat: built on the older
+\emph{Qwen2-VL} (not 2.5), self-reported on VSI-Bench only. The \emph{recipe}
+(spatial-data GRPO) is the transferable lesson even if the released checkpoint is
+not the best base.
+
+\subsection{Test-time scaling, keyframes, self-consistency}
+Test-time perception scaling yields \emph{real but modest} gains: VideoChat-R1.5's
+iterative perception improves VideoMME 65.2$\to$67.9 ($+$2.7) and LongVideoBench
+61.4$\to$62.9 ($+$1.5) as perception steps increase, but only $+$1.4 on VSI-Bench
+(40.6 vs 39.2)~\cite{videochatr15}. The largest gains are on \emph{grounding}, not
+spatial \emph{reasoning}. Implication: iterative perception and self-consistency
+help, but spatial-reasoning improvements are small, so they should be
+\emph{combined} (RL base $+$ frame strategy $+$ voting) rather than relied on
+singly. Question-conditioned keyframe selection (relevance $+$ coverage) remains a
+sensible next experiment for the long-clip tail; for the short-median clips here,
+dense uniform sampling within the question window is a strong default.
+
+\subsection{Analog benchmark: where even frontier models fail}
+\textbf{Video-Holmes}~\cite{videoholmes} is a close analog: 1{,}837 MCQ over 270
+annotated suspense films, requiring models to \emph{locate and connect multiple
+scattered clues across segments}. Even \textbf{Gemini-2.5-Pro tops out at only
+45\%}, with most models below 40\% --- corroborating that reasoning-heavy,
+cross-frame video QA is unsolved even for proprietary upper bounds, and that this
+is a genuine research frontier rather than an engineering-only gap.
+
+% ===========================================================================
+\section{Candidate selection and recommendations}
+% ===========================================================================
+Synthesising the above, Table~\ref{tab:candidates} ranks concrete candidates by
+expected value under the project's existing vLLM pipeline.
+
+\begin{table}[ht]
+\centering
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{>{\raggedright\arraybackslash}p{3.5cm} >{\raggedright\arraybackslash}p{6.0cm} c}
+\toprule
+\textbf{Candidate} & \textbf{Rationale} & \textbf{Priority} \\
+\midrule
+\best{Video-R1-7B} (Qwen2.5-VL-7B + T-GRPO) &
+Best-evidenced open reasoner; temporal reward targets cross-frame reasoning;
+beats GPT-4o on VSI-Bench; fully open, MIT, drops into vLLM unchanged. & \best{P0} \\
+\best{VideoChat-R1.5-7B} (RFT + iterative perception) &
+Spatio-temporal RL plus a think-then-look test-time loop; partly decorrelated
+from Video-R1 for ensembling. & \best{P0} \\
+CoT + self-consistency ($n{=}5$, $T{\approx}0.6$) &
+Highest-yield test-time lever; reasoning $>$ scale on this benchmark. & \best{P0} \\
+Qwen3-VL / InternVL3.5 (largest that fits, AWQ) &
+Strongest \emph{non-RL} bases; improved spatial perception; natural upgrade from
+existing presets and the non-RL reference point. & P1 \\
+vsGRPO recipe (spatial-data GRPO) &
+Directly targets the $\approx$69\% spatial slice; surpassed GPT-4o at 2B. Use the
+released ckpt as a probe; recipe is the transferable win. & P1 \\
+Video-R1 + VideoChat-R1.5 vote ensemble &
+Captures macro-accuracy upside on small/hard categories; \texttt{ensemble.py}
+already exists. & P1 \\
+16--32 uniform frames, max side 448 &
+Empirically saturating budget; matches short median clip length. & P1 \\
+Spatial-aware structured prompts &
+``Describe layout, then reason''; structured prompts lifted spatial categories in
+the paper. & P1 \\
+Question-conditioned keyframe selection &
+Next experiment if uniform plateaus, esp.\ for the long-clip tail. & P2 \\
+DeepVideo-R1 (Reg-GRPO) &
+Alternative RL base if Video-R1 / VideoChat plateau; open. & P2 \\
+Qwen2.5-VL-72B-AWQ (current) &
+Solid, already-validated baseline to beat; reference for ablations. & baseline \\
+\bottomrule
+\end{tabular}
+\caption{Ranked candidate models and strategies. P0 = do first; P2 = if budget
+allows. RL-tuned 7B open reasoners now outrank larger non-RL bases on the evidence.}
+\label{tab:candidates}
+\end{table}
+
+\subsection*{Recommended program of work}
+\begin{enumerate}[leftmargin=1.4em,itemsep=2pt]
+  \item \textbf{Baseline-to-beat:} run current Qwen2.5-VL-72B-AWQ at 16 frames on
+  \texttt{val}; record per-category accuracy.
+  \item \textbf{Swap in an RL reasoner:} register \best{Video-R1-7B} (then
+  \best{VideoChat-R1.5-7B}) as presets; compare overall \emph{and} macro. Expect
+  the 7B RL models to be competitive with or beat the 72B non-RL base on reasoning.
+  \item \textbf{Add test-time compute:} CoT $+$ self-consistency $n{=}5$ on the
+  best base; verify the gain exceeds the cost.
+  \item \textbf{Ensemble} the best two families with the existing vote script; tune
+  weights on \texttt{val} (optimise macro for the small categories).
+  \item \textbf{Targeted prompting} for the weak, large spatial categories (depth,
+  vertical, counting) using ``describe spatial layout first'' prompts.
+  \item \textbf{Frame / keyframe study} only if (3)--(5) plateau: 16 vs 32 frames,
+  then question-conditioned selection on the long-clip subset.
+  \item \textbf{(Optional) spatial GRPO:} if compute allows, probe the vsGRPO
+  recipe on a Qwen2.5-VL base using public spatial data --- highest-relevance to
+  the dominant category.
+\end{enumerate}
+
+% ===========================================================================
+\section{Caveats and open questions}
+% ===========================================================================
+This is a fast-moving field; all primary sources are March 2025--2026. The findings
+above passed 3-vote adversarial verification (24/25 confirmed), but several
+caveats bound their use:
+
+\begin{itemize}[leftmargin=1.4em,itemsep=2pt]
+  \item \textbf{No ImplicitQA-specific results exist beyond the original paper.}
+  All RL/spatial numbers (Video-R1, vsGRPO, etc.) are reported on \emph{VSI-Bench /
+  Video-Holmes}, not on ImplicitQA. Transfer is plausible (shared spatial /
+  cross-frame skills) but unproven --- \emph{validate every candidate on
+  \texttt{val} before trusting it}.
+  \item \textbf{RL gains are small and often self-reported.} Margins over GPT-4o
+  are typically $+$1.4 to $+$3.1 points on a single benchmark, with no independent
+  reproduction located. Treat headline ``beats GPT-4o'' claims as suggestive, not
+  decisive.
+  \item \textbf{Base-model mismatch.} Video-R1 / VideoChat-R1 use Qwen2.5-VL;
+  vsGRPO uses the older Qwen2-VL. This affects vLLM compatibility and expected
+  transfer --- prefer the 2.5-VL-based checkpoints.
+  \item \textbf{Unverified items.} No primary-source video-reasoning numbers for
+  Qwen3-VL, InternVL3.5, or GPT-5-class models survived verification; their entries
+  here are landscape context, not benchmarked claims. A claimed ``SpatialStack-5B,
+  VSI-Bench 67.5, rank-1'' was \textbf{refuted (0--3 votes) and must not be used}.
+  The Dual-Clue Reasoning paper (arXiv:2506.07811) was requested but yielded no
+  verified, runnable method --- treat as a lead, not a recommendation.
+  \item \textbf{Metric definition matters.} ``No open model $>$50\%'' holds for
+  \emph{overall} accuracy; InternVL3 reaches 50.2\% on the category-balanced
+  \emph{macro} metric. Always report both.
+\end{itemize}
+
+% ===========================================================================
+\section{Conclusion}
+% ===========================================================================
+ImplicitQA/VRR-QA is a small, clean, reasoning-first benchmark dominated by 3D
+spatial questions, with an enormous human--machine gap and a clear published
+signal that \emph{reasoning-style inference matters more than raw scale}. The
+2025--2026 literature operationalises that signal for open models via RL / GRPO
+post-training. The evidence points to a concrete plan: adopt an \textbf{RL-tuned
+Qwen2.5-VL-7B reasoner} (Video-R1, then VideoChat-R1.5) as the base, amplify it
+with \textbf{CoT + self-consistency} and iterative perception, \textbf{ensemble}
+across families, and concentrate prompting on the large, hard \emph{spatial}
+categories --- all within the project's existing vLLM pipeline. Frame budget should
+stay modest (16--32); compute is better spent on reasoning than on more frames.
+Crucially, because no method has published ImplicitQA-specific numbers, every
+candidate must be re-validated on the local \texttt{val} split before selection.
+
+% ===========================================================================
+\begin{thebibliography}{99}
+\small
+\bibitem{implicitqa}
+ImplicitQA: Going beyond frames towards Implicit Video Reasoning
+(retitled \emph{VRR-QA} in v3). arXiv:2506.21742, 2025.
+\url{https://arxiv.org/abs/2506.21742}
+
+\bibitem{videor1}
+Video-R1: Reinforcing Video Reasoning in MLLMs (T-GRPO). arXiv:2503.21776,
+NeurIPS 2025. Code: \url{https://github.com/tulerfeng/Video-R1}
+
+\bibitem{videochatr1}
+VideoChat-R1: Enhancing Spatio-Temporal Perception via Reinforcement Fine-Tuning.
+arXiv:2504.06958, NeurIPS 2025. Code: \url{https://github.com/OpenGVLab/VideoChat-R1}
+
+\bibitem{videochatr15}
+VideoChat-R1.5: Visual Test-Time Scaling via Iterative Perception.
+arXiv:2509.21100, NeurIPS 2025. \url{https://arxiv.org/abs/2509.21100}
+
+\bibitem{deepvideor1}
+DeepVideo-R1: Video Reinforcement Fine-Tuning via Reg-GRPO and Difficulty-Aware
+Augmentation. arXiv:2506.07464, NeurIPS 2025.
+Code: \url{https://github.com/mlvlab/DeepVideoR1}
+
+\bibitem{vsgrpo}
+Improved Visual-Spatial Reasoning via R1-Zero-Like Training (vsGRPO).
+arXiv:2504.00883, 2025. \url{https://arxiv.org/abs/2504.00883}
+
+\bibitem{videoholmes}
+Video-Holmes: Can MLLMs Think Like a Detective? A Reasoning-Heavy Video Benchmark.
+arXiv:2505.21374, 2025. \url{https://arxiv.org/abs/2505.21374}
+
+\bibitem{qwen25vl}
+Qwen Team, Alibaba Group. \emph{Qwen2.5-VL Technical Report.} arXiv:2502.13923, 2025.
+\url{https://arxiv.org/abs/2502.13923}
+
+\bibitem{qwen3vl}
+Qwen3-VL. OpenLM.ai (model card / overview), 2025--2026.
+\url{https://openlm.ai/qwen3-vl/}
+
+\bibitem{internvl35}
+InternVL3.5: Advancing Open-Source Multimodal Models in Versatility, Reasoning,
+and Efficiency. arXiv:2508.18265, 2025. \url{https://arxiv.org/abs/2508.18265}
+
+\bibitem{dualclue}
+Looking Beyond Visible Cues: Implicit Video Question Answering via Dual-Clue
+Reasoning. arXiv:2506.07811, 2025. \url{https://arxiv.org/abs/2506.07811}
+
+\bibitem{aks}
+Adaptive Keyframe Sampling for Long Video Understanding. arXiv:2502.21271, 2025.
+\url{https://arxiv.org/abs/2502.21271}
+
+\end{thebibliography}
+
+\end{document}

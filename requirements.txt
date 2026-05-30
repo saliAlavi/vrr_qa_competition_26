@@ -1,0 +1,19 @@
+# Final system (Gemini 3.1 Pro) needs only:
+google-genai>=2.7
+tqdm
+
+# Open-weights baselines / ablations (GPU):
+torch>=2.10
+transformers>=5.7
+vllm>=0.18.1
+qwen-vl-utils
+av                 # frame decoding (PyAV)
+pillow
+numpy
+wandb
+
+# Audio transcripts (ablation):
+faster-whisper
+
+# Submission:
+# evalai-cli  (installed separately; see scripts/submit.py)
