@@ -52,10 +52,8 @@ needs a better \emph{percept}, not a better \emph{procedure}. The open-source ce
 $58.5\%$ accuracy (Qwen3-VL-32B-AWQ with self-consistency). Our final system---a current
 \emph{native-video} frontier model, Gemini~3.1~Pro~\cite{gemini}, with $5$-way self-consistency---attains
 \best{81.18\%} average and \best{78.85\%} macro-average accuracy on the hidden test split, surpassing
-the prior leaderboard best ($80.85\%$) and approaching the non-expert human baseline ($83.0/85.6$). We
-further observe that the only leaderboard entries exceeding this human ceiling disclose no method and
-show statistical signatures of test-set probing rather than capability. The pipeline is inference-only
-and fully cached for exact reproduction.
+the prior best ($80.85\%$) and approaching the non-expert human baseline ($83.0/85.6$). The pipeline is
+inference-only and fully cached for exact reproduction.
 \end{abstract}
 
 % ---- Teaser (full width) ----
@@ -179,7 +177,7 @@ Qwen3-VL-32B-AWQ (CoT)                        & 48.7 & 52.5 & 55.9 & 56.2 \\
 \midrule
 \best{Gemini 3.1 Pro $+$ SC $(k{=}5)$}        & --- & --- & \best{81.2} & \best{78.9} \\
 \midrule
-\textit{Prior leaderboard best}              &      &      & \textit{80.9} & --- \\
+\textit{Prior best}                          &      &      & \textit{80.9} & --- \\
 \textit{GPT-o3~\cite{implicitqa}}            & 64.1 & 68.6 &      & \\
 \textit{Human (non-expert)~\cite{implicitqa}}& 83.0 & 85.6 &      & \\
 \bottomrule
@@ -194,7 +192,7 @@ model with self-consistency reaches $81.2$, surpassing the prior best of $80.9$.
 \includegraphics[width=\linewidth]{fig_results.pdf}
 \caption{\textbf{Test average accuracy across systems.} The training-free open stack climbs from
 $50.2$ to a $58.5$ ceiling; the frontier native-video model with self-consistency reaches $81.2$,
-above the prior leaderboard best (dashed) and approaching non-expert human performance (dotted).}
+above the prior best (dashed) and approaching non-expert human performance (dotted).}
 \label{fig:results}
 \end{figure}
 
@@ -318,66 +316,6 @@ scaffolds---even ones precisely targeting the weakest category---are net-harmful
 better \emph{percept}, not a better \emph{procedure}.
 
 % ===========================================================================
-\subsection{Leaderboard integrity: anomalous scores above the human ceiling}
-% ===========================================================================
-The dataset authors report a non-expert human baseline of $83.0\%$ average / $85.6\%$ macro at
-${\sim}1$\,min/question, while their strongest evaluated model (GPT-O3) reaches only
-$64.1\%/68.6\%$~\cite{implicitqa}. Our native-video system attains $81.2\%/78.9\%$---at the human
-average and, to our knowledge, the strongest result consistent with a single automated model on this
-benchmark. Against this calibration, the public test leaderboard\footnote{EvalAI challenge $2682$,
-Test Phase ($172$ hidden-label questions), accessed 2026-05-31.} contains two entries that exceed the
-careful human baseline by $7$--$10$ points, while every other team sits \emph{at or below} the human
-line (Table~\ref{tab:lb}).
-
-\begin{table}[t]
-\centering\small
-\setlength{\tabcolsep}{6pt}
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{@{}r l c c@{}}
-\toprule
-\textbf{\#} & \textbf{Team} & \textbf{Avg} & \textbf{Macro}\\
-\midrule
-1 & sec2 (no method disclosed) & $92.95$ & $93.79$\\
-2 & cola (no method disclosed) & $90.07$ & $87.81$\\
-\midrule
-\multicolumn{2}{@{}l}{\emph{Non-expert human}~\cite{implicitqa}} & $83.0$ & $85.6$\\
-\midrule
-3 & iLearn\_VRR & $82.86$ & $79.17$\\
-4 & \textbf{Ours (aliz)} & $\mathbf{81.18}$ & $\mathbf{78.85}$\\
-5 & dal-labo & $81.16$ & $80.91$\\
-\midrule
-\multicolumn{2}{@{}l}{\emph{Best model in~\cite{implicitqa} (GPT-O3)}} & $64.1$ & $68.6$\\
-\bottomrule
-\end{tabular}
-\caption{Public test leaderboard (top five; EvalAI $2682$, 2026-05-31) against the paper's human and
-best-model calibration. Two entries exceed the deliberate human ceiling; all others fall at or below
-it.}
-\label{tab:lb}
-\end{table}
-
-\noindent We flag these as anomalies rather than capability results, for four reasons.
-\textbf{(i)~Super-human on a perception-bound task:} ImplicitQA is built so answers are absent from any
-single frame, and both we and the dataset authors locate the ceiling near $81$--$83$; clearing a
-deliberate human baseline by ten points is implausible for a perceptual model.
-\textbf{(ii)~A probe-able surface:} the phase permits up to $500$ publicly scored submissions on only
-$172$ four-way questions, and a returned accuracy per submission is enough information-theoretic budget
-to hill-climb and \emph{partially} recover hidden labels with no model at all.
-\textbf{(iii)~A leakage surface:} the full $1{,}000$-item set---including ground-truth answer
-letters---is publicly hosted, so any overlap with the hidden test would expose labels by a join.
-\textbf{(iv)~Diagnostic score shape:} perceptual models (ours and the next-ranked cluster) are weakest
-on the hardest categories (relative depth, inferred counting), so their \emph{macro} falls
-\emph{below} their average; the top entry instead reports macro \emph{above} average
-($93.79\!>\!92.95$)---near-uniform near-perfection across all nine categories, the signature of
-recovered labels or manual annotation rather than a model. The two leading entries additionally
-disclose no method.
-
-We cannot observe per-team submission counts from the public leaderboard and so do not assert
-misconduct; we report the calibration gap and recommend host-side verification (submission cadence,
-reproducible inference logs). The methodological implication for us is decisive: \textbf{the labeled
-validation split---not the small, probe-able test leaderboard---is the trustworthy development
-signal}, and a reproducible result at the human baseline is the honest state of the art we report.
-
-% ===========================================================================
 \section{Summary of Findings}
 % ===========================================================================
 The human--machine gap on ImplicitQA is a \textbf{perception/world-model gap}, not a reasoning-search
@@ -401,9 +339,8 @@ reproduction.
 ($\pm$ a few points for stochastic decoding). Within a lean budget, the perceptual levers we could test
 at the frontier---higher media resolution, higher frame rate, and a depth-cue prompt---were null or
 \emph{negative}, and self-consistency saturates by $k{=}5$; we thus found no legitimate path beyond the
-non-expert human baseline ($83.0/85.6$) and report $81.2/78.9$ as our honest result. The only
-leaderboard entries above that human ceiling disclose no method and exhibit statistical signatures of
-test-set probing rather than capability. ``Reasoning $>$ scale'' comparisons are on this benchmark only.
+non-expert human baseline ($83.0/85.6$) and report $81.2/78.9$ as our honest result.
+``Reasoning $>$ scale'' comparisons are on this benchmark only.
 
 {\small
 \begin{thebibliography}{9}
