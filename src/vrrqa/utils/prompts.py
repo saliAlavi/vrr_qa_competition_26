@@ -125,6 +125,76 @@ def build_question_prompt(question: str, options: Dict[str, str], cot: bool = Tr
     )
 
 
+DEPTH_SYSTEM_PROMPT = (
+    "You are an expert at spatial reasoning over video. You judge 3D spatial "
+    "relationships from 2D frames using monocular depth cues, and you reason about "
+    "ORDER and RELATIONS, never absolute distances. You never invent measurements. "
+    "You answer multiple-choice questions by mapping a carefully reconstructed 3D "
+    "layout onto exactly one of the given options."
+)
+
+# Depth/proximity/relative-position + POV cluster — the categories with the highest
+# error rate. Detector is keyword-based and high-precision (answer-blind).
+_DEPTH_RE = re.compile(
+    r"\b(relative to|located relative|point of view|from .{0,20}perspective|"
+    r"in front|behind|nearer|closer|proximity|distance from|how far|"
+    r"between the|next to|in relation to)\b", re.IGNORECASE)
+
+
+# Causal/temporal stems: even if they mention spatial words ("why did X come in front
+# of Y"), they are NOT depth questions and must keep the baseline prompt.
+_NOT_DEPTH_RE = re.compile(r"^\s*(why|what caused|what made|how did .* (cause|make)|"
+                           r"what happens after|because)\b", re.IGNORECASE)
+
+
+def is_depth_question(question: str) -> bool:
+    """True for depth/proximity/relative-position/POV questions (the hardest cluster).
+    Excludes causal 'why/what-caused' questions that merely mention spatial words."""
+    q = question or ""
+    if _NOT_DEPTH_RE.search(q):
+        return False
+    return bool(_DEPTH_RE.search(q))
+
+
+def build_depth_prompt(question: str, options: Dict[str, str]) -> str:
+    """Cue-guided ordinal depth reasoning (Version A): pairwise occlusion first,
+    monocular cue priority, reference-frame pinning, then map to one option."""
+    opts = format_options(options)
+    letters = ", ".join(sorted(options.keys()))
+    return (
+        f"Question: {question}\n\nOptions:\n{opts}\n\n"
+        "This question is about depth / proximity / relative position. Follow this "
+        "procedure exactly. Reason in relative, ordinal terms only — never estimate "
+        "distances in meters or any absolute units.\n\n"
+        "STEP 0 — Pin the reference frame. Decide which is asked: (a) proximity to the "
+        "CAMERA/viewer; (b) the relation BETWEEN two scene objects in 3D; or (c) position "
+        "from a NAMED CHARACTER'S OWN egocentric viewpoint (their own left/right/front/back "
+        "as they face, NOT the screen's). State the frame in one sentence. Remember: two "
+        "things can be adjacent in the image yet far apart in depth — keep image position "
+        "and depth separate.\n\n"
+        "STEP 1 — Pairwise occlusion (STRONGEST cue, near-certain). For each relevant pair "
+        "of target objects, decide whether one object's contour passes unbroken in front of "
+        "the other; the unbroken-outline object is NEARER. State who occludes whom.\n\n"
+        "STEP 2 — Where occlusion is unavailable, use the highest-ranked cue that applies: "
+        "(1) occlusion; (2) relative size for SAME-CLASS objects (larger = nearer); "
+        "(3) ground-contact height for objects on a common ground plane (lower in frame = "
+        "nearer); (4) sharper texture/focus = nearer; (5) linear perspective (closer to the "
+        "vanishing point = farther).\n\n"
+        "STEP 3 — Resolve a single front-to-back (nearer→farther) order from the pairwise "
+        "judgments. If they form a contradiction/cycle, say so and re-decide that pair with "
+        "the next cue down the list.\n\n"
+        "STEP 4 — State each target's left/right and above/below image position, transformed "
+        "into the Step-0 reference frame (for case (c), rotate screen-left/right into the "
+        "character's own left/right).\n\n"
+        "STEP 5 — Map the resolved depth order + image position to exactly ONE option. If two "
+        "options seem close, pick the one consistent with the STRONGEST cue (occlusion wins).\n\n"
+        "If the targets never share a frame, reconstruct their relation from a shot that "
+        "establishes the layout or from consistent eyelines/camera moves; do NOT assume "
+        "separate shots mean the objects are far apart or facing away.\n\n"
+        f"End your response with a line in exactly this format:\nAnswer: <one letter from {letters}>"
+    )
+
+
 def parse_choice(text: str, valid: List[str], fallback: str = "B") -> str:
     """Extract the chosen option letter from free-form model output."""
     if not text:

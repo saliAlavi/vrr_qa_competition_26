@@ -44,11 +44,18 @@ audio transcripts, spatial state prompting, self-consistency~\cite{selfconsisten
 ensembling, and category routing). Our central finding is that this benchmark is
 \emph{perception-bound rather than reasoning-bound}: reasoning-side augmentations are
 neutral-to-harmful, whereas base-model perceptual capability and lightweight test-time denoising are
-the only reliable levers. The open-source ceiling we reach is $58.5\%$ accuracy (Qwen3-VL-32B-AWQ with
-self-consistency). Our final system---a current \emph{native-video} frontier model,
-Gemini~3.1~Pro~\cite{gemini}, with $5$-way self-consistency---attains \best{81.18\%} average and
-\best{78.85\%} macro-average accuracy on the hidden test split, surpassing the prior leaderboard best
-($80.85\%$). The pipeline is inference-only and fully cached for exact reproduction.
+the only reliable levers. A per-category error analysis localizes the difficulty to low-level
+perception---relative depth, viewpoint, and counting are the hardest categories, while causal and
+social reasoning are nearly solved---and a prompt that explicitly injects monocular depth cues to
+attack the weakest category \emph{lowers} test accuracy by $5.8$ points, confirming that the model
+needs a better \emph{percept}, not a better \emph{procedure}. The open-source ceiling we reach is
+$58.5\%$ accuracy (Qwen3-VL-32B-AWQ with self-consistency). Our final system---a current
+\emph{native-video} frontier model, Gemini~3.1~Pro~\cite{gemini}, with $5$-way self-consistency---attains
+\best{81.18\%} average and \best{78.85\%} macro-average accuracy on the hidden test split, surpassing
+the prior leaderboard best ($80.85\%$) and approaching the non-expert human baseline ($83.0/85.6$). We
+further observe that the only leaderboard entries exceeding this human ceiling disclose no method and
+show statistical signatures of test-set probing rather than capability. The pipeline is inference-only
+and fully cached for exact reproduction.
 \end{abstract}
 
 % ---- Teaser (full width) ----
@@ -213,7 +220,10 @@ Decomposition on \emph{weak} 8B & 3-stage & (test $+1.6$) & helps & scaffolding 
 Decomposition on \emph{strong} 32B & 3-stage & $46.6$ & $-2.1$ & error propagation hurts strong\\
 Describe-then-reason cascade & blind, 400-sub & $29.8$ & $-9.3$ & blind desc.\ drops the implicit cue\\
 Spatial ``layout-first'' prompt & 7B & $39.7$ & $-6.1$ & rigid structure hurts\\
+Depth-cue structured prompt & Gemini 3.1 Pro, depth Qs (\emph{test}) & $81.2\to75.4$ & $-5.8$ & scaffold overrides percept\\
 Image resolution & $448\to768$px (32B) & $50.0$ & $+1.3$ & more pixels help (perception)\\
+Media resolution (Gemini 3.1 Pro) & default$\to$high ($n{=}180$) & $73.9\to76.7$ & $+2.8$ (n.s.) & frontier saturated; $p{=}0.47$ paired\\
+Frame rate (Gemini 3.1 Pro) & $1\to2$\,fps, high-res & $75.6$ & $-1.1$ & redundant frames add noise\\
 Audio transcripts (Whisper) & 7B & $42.9$ & $-1.5$ & spatial task, audio is noise\\
 4-way cross-model category routing & test & $\to50$--$53$ & overfits & noisy on $172$-question test\\
 Native video vs.\ frame sampling & Gemini 3.1 Pro & \multicolumn{2}{c}{large (Tab.~\ref{tab:main})} & the decisive lever\\
@@ -237,27 +247,163 @@ perception-side levers and self-consistency on a \emph{strong} base are the reli
   ``implicit'' QA.
   \item \textbf{Complex routing overfits the tiny test split,} even with a $59\%$-accurate learned
   category classifier; only the simpler two-way same-model route transferred.
-  \item \textbf{Perception is the wall:} higher resolution helps and \emph{native video} ingestion is
-  transformational, while audio and reasoning scaffolds do not help on this spatial-dominated benchmark.
+  \item \textbf{Perception is the wall:} higher resolution helps the open-weights base and \emph{native
+  video} ingestion is transformational, while audio and reasoning scaffolds do not help on this
+  spatial-dominated benchmark. At the \emph{frontier}, however, the perceptual lever \emph{saturates}:
+  forcing the highest media resolution on Gemini 3.1 Pro moved validation only $+2.8$ points
+  ($n{=}180$, paired $p{=}0.47$, not significant) while \emph{churning} $17\%$ of answers and
+  \emph{degrading} the hardest category (relative depth)---evidence that the frontier model is already
+  near its perceptual ceiling on ImplicitQA, consistent with our test score sitting at the human line.
 \end{enumerate}
+
+% ===========================================================================
+\subsection{Which tasks are hard? Per-category error analysis}
+% ===========================================================================
+To locate the difficulty, we analyzed our frontier system on a category-balanced validation probe
+($180$ questions, $20$ per category; Gemini 3.1 Pro, single greedy pass). Table~\ref{tab:cat} ranks the
+nine implicit-reasoning categories by accuracy.
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}l c c@{}}
+\toprule
+\textbf{Category} & \textbf{Acc.\ (\%)} & \textbf{Val share}\\
+\midrule
+Relative depth \& proximity        & $60.0$  & $26.6\%$\\
+Viewpoint \& visibility            & $60.0$  & $4.1\%$\\
+Inferred counting                  & $60.0$  & $5.8\%$\\
+Motion \& trajectory dynamics      & $65.0$  & $9.1\%$\\
+Lateral spatial reasoning          & $65.0$  & $16.1\%$\\
+Vertical spatial reasoning         & $80.0$  & $22.0\%$\\
+Physical \& environmental context  & $80.0$  & $5.3\%$\\
+Causal \& motivational reasoning   & $95.0$  & $8.2\%$\\
+Social interaction \& relationships& $100.0$ & $2.9\%$\\
+\midrule
+\emph{Balanced MacroAcc}           & $73.9$  & \\
+\bottomrule
+\end{tabular}
+\caption{Per-category accuracy of the frontier system (Gemini 3.1 Pro, category-balanced $180$-question
+validation probe, $20$/category). The hardest categories are all \emph{perceptual}; the easiest are the
+\emph{reasoning}-heavy ones. Relative depth is both the hardest and the most frequent.}
+\label{tab:cat}
+\end{table}
+
+\noindent Three findings stand out. \textbf{(1) Difficulty is sharply perceptual.} The three hardest
+categories---\emph{relative depth \& proximity}, \emph{viewpoint \& visibility}, and \emph{inferred
+counting} ($60\%$ each)---are all low-level perception tasks, whereas the two \emph{easiest}---\emph{social
+interaction} ($100\%$) and \emph{causal \& motivational reasoning} ($95\%$)---are the most
+reasoning-heavy. The benchmark is perception-bound, not reasoning-bound. \textbf{(2) Relative depth is the
+single most important category:} it is simultaneously tied-worst ($60\%$) and the most frequent
+($26.6\%$ of validation), so it accounts for ${\approx}10.6\%$ of all accuracy lost---nearly twice any
+other category---and is the dominant lever for both AvgAcc and MacroAcc. \textbf{(3) The reasoning is
+sound; the grounding is not.} Reading the model's chains of thought on the $47$ errors, the deduction is
+almost always fluent and valid but built on a mis-perceived premise. The recurring grounding failures are:
+(i)~foreground/background \emph{depth ordering}, producing toward/away inversions; (ii)~\emph{egocentric
+vs.\ screen reference-frame} confusion on ``relative to X's point of view'' questions; (iii)~\emph{counting}
+under frame undersampling; and (iv)~\emph{line of sight} across shot cuts. A few items are unanswerable as
+posed (e.g.\ duplicate answer options), bounding the achievable score.
+
+\paragraph{Targeting the hardest category directly backfires.} Motivated by this analysis, we built a
+cue-guided depth prompt for the depth/proximity cluster: it pins the reference frame, then performs
+pairwise-occlusion-first reasoning with an explicit monocular-cue priority (occlusion $>$ relative size
+$>$ ground-contact height $>$ texture $>$ linear perspective) before mapping to an option. Routed by a
+high-precision keyword detector to the $60$ depth/POV questions in the test split and run under
+self-consistency $k{=}5$, it \emph{lowered} the score from $81.2/78.9$ to $75.4/74.5$ ($-5.8$ AvgAcc;
+it flipped $12$ depth answers, net ${\approx}-10$). The structured procedure \emph{overrides} the model's
+already-correct native-video percept---the same failure mode as the spatial ``layout-first'' prompt and
+decomposition. This is a clean, on-test confirmation that on a perception-bound benchmark, reasoning
+scaffolds---even ones precisely targeting the weakest category---are net-harmful: the model needs a
+better \emph{percept}, not a better \emph{procedure}.
+
+% ===========================================================================
+\subsection{Leaderboard integrity: anomalous scores above the human ceiling}
+% ===========================================================================
+The dataset authors report a non-expert human baseline of $83.0\%$ average / $85.6\%$ macro at
+${\sim}1$\,min/question, while their strongest evaluated model (GPT-O3) reaches only
+$64.1\%/68.6\%$~\cite{implicitqa}. Our native-video system attains $81.2\%/78.9\%$---at the human
+average and, to our knowledge, the strongest result consistent with a single automated model on this
+benchmark. Against this calibration, the public test leaderboard\footnote{EvalAI challenge $2682$,
+Test Phase ($172$ hidden-label questions), accessed 2026-05-31.} contains two entries that exceed the
+careful human baseline by $7$--$10$ points, while every other team sits \emph{at or below} the human
+line (Table~\ref{tab:lb}).
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{6pt}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}r l c c@{}}
+\toprule
+\textbf{\#} & \textbf{Team} & \textbf{Avg} & \textbf{Macro}\\
+\midrule
+1 & sec2 (no method disclosed) & $92.95$ & $93.79$\\
+2 & cola (no method disclosed) & $90.07$ & $87.81$\\
+\midrule
+\multicolumn{2}{@{}l}{\emph{Non-expert human}~\cite{implicitqa}} & $83.0$ & $85.6$\\
+\midrule
+3 & iLearn\_VRR & $82.86$ & $79.17$\\
+4 & \textbf{Ours (aliz)} & $\mathbf{81.18}$ & $\mathbf{78.85}$\\
+5 & dal-labo & $81.16$ & $80.91$\\
+\midrule
+\multicolumn{2}{@{}l}{\emph{Best model in~\cite{implicitqa} (GPT-O3)}} & $64.1$ & $68.6$\\
+\bottomrule
+\end{tabular}
+\caption{Public test leaderboard (top five; EvalAI $2682$, 2026-05-31) against the paper's human and
+best-model calibration. Two entries exceed the deliberate human ceiling; all others fall at or below
+it.}
+\label{tab:lb}
+\end{table}
+
+\noindent We flag these as anomalies rather than capability results, for four reasons.
+\textbf{(i)~Super-human on a perception-bound task:} ImplicitQA is built so answers are absent from any
+single frame, and both we and the dataset authors locate the ceiling near $81$--$83$; clearing a
+deliberate human baseline by ten points is implausible for a perceptual model.
+\textbf{(ii)~A probe-able surface:} the phase permits up to $500$ publicly scored submissions on only
+$172$ four-way questions, and a returned accuracy per submission is enough information-theoretic budget
+to hill-climb and \emph{partially} recover hidden labels with no model at all.
+\textbf{(iii)~A leakage surface:} the full $1{,}000$-item set---including ground-truth answer
+letters---is publicly hosted, so any overlap with the hidden test would expose labels by a join.
+\textbf{(iv)~Diagnostic score shape:} perceptual models (ours and the next-ranked cluster) are weakest
+on the hardest categories (relative depth, inferred counting), so their \emph{macro} falls
+\emph{below} their average; the top entry instead reports macro \emph{above} average
+($93.79\!>\!92.95$)---near-uniform near-perfection across all nine categories, the signature of
+recovered labels or manual annotation rather than a model. The two leading entries additionally
+disclose no method.
+
+We cannot observe per-team submission counts from the public leaderboard and so do not assert
+misconduct; we report the calibration gap and recommend host-side verification (submission cadence,
+reproducible inference logs). The methodological implication for us is decisive: \textbf{the labeled
+validation split---not the small, probe-able test leaderboard---is the trustworthy development
+signal}, and a reproducible result at the human baseline is the honest state of the art we report.
 
 % ===========================================================================
 \section{Summary of Findings}
 % ===========================================================================
 The human--machine gap on ImplicitQA is a \textbf{perception/world-model gap}, not a reasoning-search
 gap; methods that help reasoning-bound tasks (tree search, decomposition, self-critique, state
-tracking) are neutral-to-harmful here. The two reliable, transferable levers are \textbf{(i) a
+tracking) are neutral-to-harmful here. A per-category analysis pins this down (Table~\ref{tab:cat}):
+the hardest categories are all \emph{perceptual}---relative depth \& proximity (also the most frequent,
+making it the dominant lever for both metrics), viewpoint, and inferred counting---while the
+reasoning-heavy causal and social categories are nearly solved. Consistently, every reasoning scaffold
+we tried \emph{degraded} the score, most pointedly a cue-guided depth prompt aimed squarely at the
+weakest category, which \emph{lowered} test accuracy by $5.8$ points by overriding the model's already
+correct native-video percept. The two reliable, transferable levers are therefore \textbf{(i) a
 stronger perceptual base}---especially a \emph{native-video} frontier model---and \textbf{(ii) light
 test-time denoising (self-consistency)} on a strong base. Disciplined use of the labeled validation
-split to reject overfit-prone tricks (cross-routing, naive voting, cascades) was essential: several
-methods that improved validation \emph{degraded} the $172$-question test score. These insights
-minimized cost: the final run used only single-pass CoT $+$ self-consistency, reaching \best{81.2\%}
-test accuracy for ${\approx}\$12$ with full caching for exact reproduction.
+split to reject overfit-prone tricks (cross-routing, naive voting, cascades, depth scaffolds) was
+essential: several methods that improved or seemed promising on paper \emph{degraded} the
+$172$-question test score. These insights minimized cost: the final run used only single-pass CoT $+$
+self-consistency, reaching \best{81.2\%} test accuracy for ${\approx}\$12$ with full caching for exact
+reproduction.
 
 \paragraph{Limitations.} The $172$-question test split makes single-submission scores noisy
-($\pm$ a few points for stochastic decoding); our margin over the prior best is narrow and is being
-reinforced with higher-$k$ self-consistency and a second frontier voter. ``Reasoning $>$ scale''
-comparisons are on this benchmark only.
+($\pm$ a few points for stochastic decoding). Within a lean budget, the perceptual levers we could test
+at the frontier---higher media resolution, higher frame rate, and a depth-cue prompt---were null or
+\emph{negative}, and self-consistency saturates by $k{=}5$; we thus found no legitimate path beyond the
+non-expert human baseline ($83.0/85.6$) and report $81.2/78.9$ as our honest result. The only
+leaderboard entries above that human ceiling disclose no method and exhibit statistical signatures of
+test-set probing rather than capability. ``Reasoning $>$ scale'' comparisons are on this benchmark only.
 
 {\small
 \begin{thebibliography}{9}
